@@ -33,7 +33,7 @@ class EF_Notifications extends EF_Module {
 		$args = array(
 			'title' => __( 'Notifications', 'edit-flow' ),
 			'short_description' => __( 'Update your team of important changes to your content.', 'edit-flow' ),
-			'extended_description' => __( 'With email notifications, you can keep everyone updated about what’s happening with a given content. Each status change or editorial comment sends out an email notification to users subscribed to a post. User groups can be used to manage who receives notifications on what.', 'edit-flow' ),
+			'extended_description' => __( 'With notifications, you can keep everyone updated about what’s happening with a given post. Each status change or editorial comment sends out an email notification to users subscribed to a post. User groups can be used to manage who receives notifications on what. You can also set up notifications that are automatically pushed to Slack or an external API by post status changes.', 'edit-flow' ),
 			'module_url' => $this->module_url,
 			'img_url' => $this->module_url . 'lib/notifications_s128.png',
 			'slug' => 'notifications',
@@ -604,7 +604,8 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
-	 * Set up and send post status change notification email
+	 * Set up and send post status change notifications
+	 * TODO - add slack/api pushes
 	 */
 	function notification_status_change( $new_status, $old_status, $post ) {
 		global $edit_flow;
@@ -1296,28 +1297,110 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
-	 * Settings page for notifications
-	 *
-	 * @since 0.7
+	 * Primary configuration page for the notification class.
+	 * Shows form to add new custom notifications on the left and a
+	 * WP_List_Table with the custom notification objects on the right
 	 */
 	function print_configure_view() {
+		global $edit_flow;
+
+		/** Full width view for editing a custom status **/
+		if ( isset( $_GET['action'], $_GET['post-id'] ) && $_GET['action'] == 'edit-custom-notification' ): ?>
+		<?php
+			// Check whether the term exists
+			$post_id = intval( $_GET['post-id'] );
+			$notification = $this->get_custom_notification_by( 'id', $post_id  );  // TODO
+			if ( ! $status ) {
+				echo '<div class="error"><p>' . $this->module->messages['notification-missing'] . '</p></div>'; // TODO
+				return;
+			}
+			$edit_notification_link = $this->get_link( array( 'action' => 'edit-status', 'post-id' => $term_id ) ); // TODO ?
+
+			$name = ( isset( $_POST['name'] ) ) ? stripslashes( $_POST['name'] ) : $notification->name;
+			$description = ( isset( $_POST['description'] ) ) ? strip_tags( stripslashes( $_POST['description'] ) ) : $notification->description;
 		?>
 
-		<div id="col-right">
-			<div class="col-wrap">
+		<div id="ajax-response"></div>
+		<form method="post" action="<?php echo esc_attr( $edit_notification_link ); ?>" >
+		<input type="hidden" name="post-id" value="<?php echo esc_attr( $post_id ); ?>" />
+		<?php
+			wp_original_referer_field();
+			wp_nonce_field( 'edit-notification' );
+		?>
+		<table class="form-table">
+			<tr class="form-field form-required">
+				<th scope="row" valign="top"><label for="name"><?php esc_html_e( 'Custom Notification', 'edit-flow' ); ?></label></th>
+				<td><input name="name" id="name" type="text" value="<?php echo esc_attr( $name ); ?>" size="40" aria-required="true" />
+				<?php $edit_flow->settings->helper_print_error_or_description( 'name', __( 'The name is used to identify the notification. (Max: 20 characters)', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+			<tr class="form-field">
+				<th scope="row" valign="top"><label for="description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label></th>
+				<td>
+					<textarea name="description" id="description" rows="5" cols="50" style="width: 97%;"><?php echo esc_textarea( $description ); ?></textarea>
+				<?php $edit_flow->settings->helper_print_error_or_description( 'description', __( 'The description is primarily for administrative use, to give you some context on what the custom notification is to be used for.', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+		</table>
+		<p class="submit">
+		<?php submit_button( __( 'Update Notification', 'edit-flow' ), 'primary', 'submit', false ); ?>
+		<a class="cancel-settings-link" href="<?php echo esc_url( $this->get_link() ); ?>"><?php esc_html_e( 'Cancel', 'edit-flow' ); ?></a>
+		</p>
+		</form>
 
+		<?php else: ?>
+		<?php
+		$wp_list_table = new EF_Custom_Notification_List_Table();
+		$wp_list_table->prepare_items(); // TODO
+		?>
+		<script type="text/javascript">
+			var ef_confirm_delete_notification_string = "<?php echo esc_js( __( 'Are you sure you want to delete the notification?', 'edit-flow' ) ); ?>";
+		</script>
+			<div id="col-right">
+				<div class="col-wrap">
+					<?php $wp_list_table->display(); ?>
+					<p class="description" style="padding-top:10px;"><?php esc_html_e( 'Something about notifications here...', 'edit-flow' ); ?></p>
+				</div>
 			</div>
-		</div>
-		<div id="col-left">
-			<form class="basic-settings" action="<?php echo esc_url( menu_page_url( $this->module->settings_slug, false ) ); ?>" method="post">
-				<?php settings_fields( $this->module->options_group_name ); ?>
-				<?php do_settings_sections( $this->module->options_group_name ); ?>
-				<?php
-					echo '<input id="edit_flow_module_name" name="edit_flow_module_name" type="hidden" value="' . esc_attr( $this->module->name ) . '" />';
-				?>
-				<p class="submit"><?php submit_button( null, 'primary', 'submit', false ); ?><a class="cancel-settings-link" href="<?php echo EDIT_FLOW_SETTINGS_PAGE; ?>"><?php esc_html_e( 'Back to Edit Flow', 'edit-flow' ); ?></a></p>
-			</form>
-		</div>
+			<div id="col-left">
+				<div class="col-wrap">
+				<div class="form-wrap">
+				<h3 class="nav-tab-wrapper">
+					<a href="<?php echo esc_url( $this->get_link() ); ?>" class="nav-tab<?php if ( !isset( $_GET['action'] ) || $_GET['action'] != 'change-options' ) echo ' nav-tab-active'; ?>"><?php esc_html_e( 'Add New', 'edit-flow' ); ?></a>
+					<a href="<?php echo esc_url( $this->get_link( array( 'action' => 'change-options' ) ) ); ?>" class="nav-tab<?php if ( isset( $_GET['action'] ) && $_GET['action'] == 'change-options' ) echo ' nav-tab-active'; ?>"><?php esc_html_e( 'Options', 'edit-flow' ); ?></a>
+				</h3>
+				<?php if ( isset( $_GET['action'] ) && $_GET['action'] == 'change-options' ): ?>
+				<form class="basic-settings" action="<?php echo esc_url( menu_page_url( $this->module->settings_slug, false ) ); ?>" method="post">
+					<?php settings_fields( $this->module->options_group_name ); ?>
+					<?php do_settings_sections( $this->module->options_group_name ); ?>
+					<?php
+						echo '<input id="edit_flow_module_name" name="edit_flow_module_name" type="hidden" value="' . esc_attr( $this->module->name ) . '" />';
+					?>
+					<p class="submit"><?php submit_button( null, 'primary', 'submit', false ); ?><a class="cancel-settings-link" href="<?php echo EDIT_FLOW_SETTINGS_PAGE; ?>"><?php esc_html_e( 'Back to Edit Flow', 'edit-flow' ); ?></a></p>
+				</form>
+				<?php else: ?>
+				<?php /** Custom form for adding a new Custom Status term **/ ?>
+					<form class="add:the-list:" action="<?php echo esc_url( $this->get_link() ); ?>" method="post" id="addstatus" name="addstatus">
+					<div class="form-field form-required">
+						<label for="status_name"><?php esc_html_e( 'Name', 'edit-flow' ); ?></label>
+						<input type="text" aria-required="true" size="20" maxlength="20" id="status_name" name="status_name" value="<?php if ( ! empty( $_POST['status_name'] ) ) echo esc_attr( $_POST['notification_name'] ) ?>" />
+						<?php $edit_flow->settings->helper_print_error_or_description( 'name', __( 'The name is used to identify the notification. (Max: 20 characters)', 'edit-flow' ) ); ?>
+					</div>
+					<div class="form-field">
+						<label for="status_description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label>
+						<textarea cols="40" rows="5" id="status_description" name="status_description"><?php if ( ! empty( $_POST['status_description'] ) ) echo esc_textarea( $_POST['notification_description'] ) ?></textarea>
+						<?php $edit_flow->settings->helper_print_error_or_description( 'description', __( 'The description is primarily for administrative use, to give you some context on what the custom notification is to be used for.', 'edit-flow' ) ); ?>
+					</div>
+					<?php wp_nonce_field( 'custom-notification-add-nonce' ); ?>
+					<?php echo '<input id="action" name="action" type="hidden" value="add-new" />'; ?>
+					<p class="submit"><?php submit_button( __( 'Add New Notification', 'edit-flow' ), 'primary', 'submit', false ); ?><a class="cancel-settings-link" href="<?php echo EDIT_FLOW_SETTINGS_PAGE; ?>"><?php esc_html_e( 'Back to Edit Flow', 'edit-flow' ); ?></a></p>
+					</form>
+				<?php endif; ?>
+				</div>
+			</div>
+			</div>
+			<?php $wp_list_table->inline_edit(); ?>
+			<?php endif; ?>
 		<?php
 	}
 
@@ -1426,6 +1509,30 @@ jQuery(document).ready(function($) {
 			return false;
 		}
 	}
+
+	/**
+	 * Generate a link to one of the custom status actions
+	 *
+	 * @since 1.0
+	 *
+	 * @param array $args (optional) Action and any query args to add to the URL
+	 * @return string $link Direct link to complete the action
+	 */
+	function get_link( $args = array() ) {
+		if ( !isset( $args['action'] ) )
+			$args['action'] = '';
+		if ( !isset( $args['page'] ) )
+			$args['page'] = $this->module->settings_slug;
+		// Add other things we may need depending on the action
+		switch( $args['action'] ) {
+			case 'delete-notification':
+				$args['nonce'] = wp_create_nonce( $args['action'] );
+				break;
+			default:
+				break;
+		}
+		return add_query_arg( $args, get_admin_url( null, 'admin.php' ) );
+	}
 }
 
 }
@@ -1467,8 +1574,8 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 		$sortable = array();
 		$this->_column_headers = array( $columns, $hidden, $sortable );
 
-		$this->items = $edit_flow->custom_status->get_custom_notifications(); //TODO
-		$total_items = count( $this->items );
+		$this->items = $this->get_custom_notifications(); //TODO
+		$total_items = ( is_array( $this->items ) ) ? count( $this->items ) : 0;
 
 		$this->set_pagination_args( array(
 			'total_items' => $total_items,
