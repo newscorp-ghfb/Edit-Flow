@@ -1,13 +1,14 @@
 <?php
 /**
  * class EF_Notifications
- * Email notifications for Edit Flow and more
+ * Notifications for Edit Flow and more
+ * TODO - need to disable custom notifications if custom statuses are disabled
  */
 
 if( ! defined( 'EF_NOTIFICATION_USE_CRON' ) )
 	define( 'EF_NOTIFICATION_USE_CRON', false );
 
-if ( !class_exists('EF_Notifications') ) {
+if ( ! class_exists('EF_Notifications') ) {
 
 class EF_Notifications extends EF_Module {
 
@@ -44,6 +45,12 @@ class EF_Notifications extends EF_Module {
 					'page' => 'on',
 				),
 				'always_notify_admin' => 'off',
+			),
+			'messages' => array(
+				'notifcation-added' => __( 'Custom notification created.', 'edit-flow' ),
+				'notifcation-missing' => __( "Custom notification doesn't exist.", 'edit-flow' ),
+				'post-updated' => __( "Custom notification updated.", 'edit-flow' ),
+				'notifcation-deleted' => __( 'Custom notification deleted.', 'edit-flow' ),
 			),
 			'configure_page_cb' => 'print_configure_view',
 			'post_type_support' => 'ef_notification',
@@ -105,6 +112,11 @@ class EF_Notifications extends EF_Module {
 			add_filter( 'ef_calendar_item_actions', array( $this, 'filter_post_row_actions' ), 10, 2 );
 			add_filter( 'ef_story_budget_item_actions', array( $this, 'filter_post_row_actions' ), 10, 2 );
 		}
+
+		// Methods for handling the actions of creating, making default, and deleting custom notifications
+		add_action( 'admin_init', array( $this, 'handle_add_custom_notification' ) );
+		add_action( 'admin_init', array( $this, 'handle_edit_custom_notification' ) );
+		add_action( 'admin_init', array( $this, 'handle_delete_custom_notification' ) );
 
 		//Ajax for saving notifiction updates
 		add_action( 'wp_ajax_save_notifications', array( $this, 'ajax_save_post_subscriptions' ) );
@@ -1308,37 +1320,61 @@ jQuery(document).ready(function($) {
 		if ( isset( $_GET['action'], $_GET['post-id'] ) && $_GET['action'] == 'edit-custom-notification' ): ?>
 		<?php
 			// Check whether the term exists
-			$post_id = intval( $_GET['post-id'] );
+			$post_id = intval( $_GET['notification-post-id'] );
 			$notification = $this->get_custom_notification_by( 'id', $post_id  );  // TODO
 			if ( ! $status ) {
 				echo '<div class="error"><p>' . $this->module->messages['notification-missing'] . '</p></div>'; // TODO
 				return;
 			}
-			$edit_notification_link = $this->get_link( array( 'action' => 'edit-status', 'post-id' => $term_id ) ); // TODO ?
+			$edit_notification_link = $this->get_link( array( 'action' => 'edit-status', 'notification-post-id' => $post_id ) ); // TODO ?
 
-			$name = ( isset( $_POST['name'] ) ) ? stripslashes( $_POST['name'] ) : $notification->name;
-			$description = ( isset( $_POST['description'] ) ) ? strip_tags( stripslashes( $_POST['description'] ) ) : $notification->description;
+			$name = ( isset( $_POST['notification_name'] ) ) ? stripslashes( $_POST['notification_name'] ) : $notification->name;
+			$description = ( isset( $_POST['notification_description'] ) ) ? strip_tags( stripslashes( $_POST['notification_description'] ) ) : $notification->description;
+			$selected_status = ( isset( $_POST['notification_post_status'] ) ) ? strip_tags( stripslashes( $_POST['notification_post_status'] ) ) : $notification->post_status;
+			$slack_webhook = ( isset( $_POST['notification_slack_webhook'] ) ) ? strip_tags( stripslashes( $_POST['notification_slack_webhook'] ) ) : $notification->slack_webhook;
+			$api_endpoint = ( isset( $_POST['notification_api_endpoint'] ) ) ? strip_tags( stripslashes( $_POST['notification_api_endpoint'] ) ) : $notification->api_endpoint;
 		?>
 
 		<div id="ajax-response"></div>
 		<form method="post" action="<?php echo esc_attr( $edit_notification_link ); ?>" >
-		<input type="hidden" name="post-id" value="<?php echo esc_attr( $post_id ); ?>" />
+		<input type="hidden" name="notification-post-id" value="<?php echo esc_attr( $post_id ); ?>" />
 		<?php
 			wp_original_referer_field();
 			wp_nonce_field( 'edit-notification' );
 		?>
 		<table class="form-table">
 			<tr class="form-field form-required">
-				<th scope="row" valign="top"><label for="name"><?php esc_html_e( 'Custom Notification', 'edit-flow' ); ?></label></th>
-				<td><input name="name" id="name" type="text" value="<?php echo esc_attr( $name ); ?>" size="40" aria-required="true" />
+				<th scope="row" valign="top"><label for="notification_name"><?php esc_html_e( 'Name', 'edit-flow' ); ?></label></th>
+				<td><input name="notification_name" id="notification_name" type="text" value="<?php echo esc_attr( $name ); ?>" size="40" aria-required="true" />
 				<?php $edit_flow->settings->helper_print_error_or_description( 'name', __( 'The name is used to identify the notification. (Max: 20 characters)', 'edit-flow' ) ); ?>
 				</td>
 			</tr>
 			<tr class="form-field">
-				<th scope="row" valign="top"><label for="description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label></th>
+				<th scope="row" valign="top"><label for="notification_description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label></th>
 				<td>
-					<textarea name="description" id="description" rows="5" cols="50" style="width: 97%;"><?php echo esc_textarea( $description ); ?></textarea>
-				<?php $edit_flow->settings->helper_print_error_or_description( 'description', __( 'The description is primarily for administrative use, to give you some context on what the custom notification is to be used for.', 'edit-flow' ) ); ?>
+					<textarea name="notification_description" id="notification_description" rows="5" cols="50" style="width: 97%;"><?php echo esc_textarea( $description ); ?></textarea>
+					<?php $edit_flow->settings->helper_print_error_or_description( 'description', __( 'The description is primarily for administrative use, to give you some context on what the custom notification is to be used for.', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+			<tr class="form-field">
+				<th scope="row" valign="top"><label for="notification_post_status"><?php esc_html_e( 'Post Status', 'edit-flow' ); ?></label></th>
+				<td><?php
+						$this->custom_status_field( $selected_status );
+					?>
+					<?php $edit_flow->settings->helper_print_error_or_description( 'post-status', __( 'Choose a custom post status that triggers this notification.', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+			<tr class="form-field">
+				<th scope="row" valign="top"><label for="notification_slack_webhook"><?php esc_html_e( 'Slack Webhook', 'edit-flow' ); ?></label></th>
+				<td>
+					<input type="text" size="40" id="notification_slack_webhook" name="notification_slack_webhook" value="<?php echo esc_attr( $slack_webhook ) ?>" />
+					<?php $edit_flow->settings->helper_print_error_or_description( 'slack-webhook', __( 'Add a webhook URL to push notifications into a specific Slack workspace and channel', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+			<tr class="form-field">
+				<th scope="row" valign="top"><label for="notification_api_endpoint"><?php esc_html_e( 'API Endpoint', 'edit-flow' ); ?></label></th>
+					<input type="text" size="40" id="notification_api_endpoint" name="notification_api_endpoint" value="<?php echo esc_attr( $api_endpoint ) ?>" />
+					<?php $edit_flow->settings->helper_print_error_or_description( 'api-endpoint', __( 'Add a remote API endpoint to receive push notifications', 'edit-flow' ) ); ?>
 				</td>
 			</tr>
 		</table>
@@ -1353,9 +1389,6 @@ jQuery(document).ready(function($) {
 		$wp_list_table = new EF_Custom_Notification_List_Table();
 		$wp_list_table->prepare_items(); // TODO
 		?>
-		<script type="text/javascript">
-			var ef_confirm_delete_notification_string = "<?php echo esc_js( __( 'Are you sure you want to delete the notification?', 'edit-flow' ) ); ?>";
-		</script>
 			<div id="col-right">
 				<div class="col-wrap">
 					<?php $wp_list_table->display(); ?>
@@ -1376,20 +1409,38 @@ jQuery(document).ready(function($) {
 					<?php
 						echo '<input id="edit_flow_module_name" name="edit_flow_module_name" type="hidden" value="' . esc_attr( $this->module->name ) . '" />';
 					?>
-					<p class="submit"><?php submit_button( null, 'primary', 'submit', false ); ?><a class="cancel-settings-link" href="<?php echo EDIT_FLOW_SETTINGS_PAGE; ?>"><?php esc_html_e( 'Back to Edit Flow', 'edit-flow' ); ?></a></p>
+					<p class="submit"><?php submit_button( null, 'primary', 'submit', false ); ?><a class="cancel-settings-link" href="<?php echo esc_url( EDIT_FLOW_SETTINGS_PAGE ); ?>"><?php esc_html_e( 'Back to Edit Flow', 'edit-flow' ); ?></a></p>
 				</form>
 				<?php else: ?>
-				<?php /** Custom form for adding a new Custom Status term **/ ?>
+				<?php /** Custom form for adding a new custom notification **/ ?>
 					<form class="add:the-list:" action="<?php echo esc_url( $this->get_link() ); ?>" method="post" id="addstatus" name="addstatus">
 					<div class="form-field form-required">
-						<label for="status_name"><?php esc_html_e( 'Name', 'edit-flow' ); ?></label>
-						<input type="text" aria-required="true" size="20" maxlength="20" id="status_name" name="status_name" value="<?php if ( ! empty( $_POST['status_name'] ) ) echo esc_attr( $_POST['notification_name'] ) ?>" />
+						<label for="notification_name"><?php esc_html_e( 'Name', 'edit-flow' ); ?></label>
+						<input type="text" aria-required="true" size="20" maxlength="20" id="notification_name" name="notification_name" value="<?php if ( ! empty( $_POST['notification_name'] ) ) echo esc_attr( $_POST['notification_name'] ) ?>" />
 						<?php $edit_flow->settings->helper_print_error_or_description( 'name', __( 'The name is used to identify the notification. (Max: 20 characters)', 'edit-flow' ) ); ?>
 					</div>
 					<div class="form-field">
-						<label for="status_description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label>
-						<textarea cols="40" rows="5" id="status_description" name="status_description"><?php if ( ! empty( $_POST['status_description'] ) ) echo esc_textarea( $_POST['notification_description'] ) ?></textarea>
+						<label for="notification_description"><?php esc_html_e( 'Description', 'edit-flow' ); ?></label>
+						<textarea cols="40" rows="5" id="notification_description" name="notification_description"><?php if ( ! empty( $_POST['notification_description'] ) ) echo esc_textarea( $_POST['notification_description'] ) ?></textarea>
 						<?php $edit_flow->settings->helper_print_error_or_description( 'description', __( 'The description is primarily for administrative use, to give you some context on what the custom notification is to be used for.', 'edit-flow' ) ); ?>
+					</div>
+					<div class="form-field">
+						<label for="notification_post_status"><?php esc_html_e( 'Post Status', 'edit-flow' ); ?></label>
+						<?php
+							$selected_status = ( ! empty( $_POST['notification_post_status'] ) ) ? sanitize_text_field( $_POST['notification_post_status'] ) : null;
+							$this->custom_status_field( $selected_status );
+						?>
+						<?php $edit_flow->settings->helper_print_error_or_description( 'post-status', __( 'Choose a custom post status that triggers this notification.', 'edit-flow' ) ); ?>
+					</div>
+					<div class="form-field">
+						<label for="notification_slack_webhook"><?php esc_html_e( 'Slack Webhook', 'edit-flow' ); ?></label>
+						<input type="text" size="40" id="notification_slack_webhook" name="notification_slack_webhook" value="<?php if ( ! empty( $_POST['notification_slack_webhook'] ) ) echo esc_attr( $_POST['notification_slack_webhook'] ) ?>" />
+						<?php $edit_flow->settings->helper_print_error_or_description( 'slack-webhook', __( 'Add a webhook URL to push notifications into a specific Slack workspace and channel', 'edit-flow' ) ); ?>
+					</div>
+					<div class="form-field">
+						<label for="notification_api_endpoint"><?php esc_html_e( 'API Endpoint', 'edit-flow' ); ?></label>
+						<input type="text" size="40" id="notification_api_endpoint" name="notification_api_endpoint" value="<?php if ( ! empty( $_POST['notification_api_endpoint'] ) ) echo esc_attr( $_POST['notification_api_endpoint'] ) ?>" />
+						<?php $edit_flow->settings->helper_print_error_or_description( 'api-endpoint', __( 'Add a remote API endpoint to receive push notifications', 'edit-flow' ) ); ?>
 					</div>
 					<?php wp_nonce_field( 'custom-notification-add-nonce' ); ?>
 					<?php echo '<input id="action" name="action" type="hidden" value="add-new" />'; ?>
@@ -1399,7 +1450,6 @@ jQuery(document).ready(function($) {
 				</div>
 			</div>
 			</div>
-			<?php $wp_list_table->inline_edit(); ?>
 			<?php endif; ?>
 		<?php
 	}
@@ -1431,61 +1481,16 @@ jQuery(document).ready(function($) {
 	 * @since 1.0
 	 */
 	function get_custom_notifications( $args = array() ) {
-		global $wp_post_statuses;
-
-		if ( $this->disable_custom_statuses_for_post_type() ) {
-			return $this->get_core_post_statuses();
-		}
-
-		// Internal object cache for repeat requests
-		$arg_hash = md5( serialize( $args ) );
-		if ( ! empty( $this->custom_statuses_cache[ $arg_hash ] ) ) {
-			return $this->custom_statuses_cache[ $arg_hash ];
-		}
-
-		// Handle if the requested taxonomy doesn't exist
-		$args     = array_merge( array( 'hide_empty' => false ), $args );
-		$statuses = get_terms( self::taxonomy_key, $args );
-
-		if ( is_wp_error( $statuses ) || empty( $statuses ) ) {
-			$statuses = array();
-		}
-
-		// Expand and order the statuses
-		$ordered_statuses = array();
-		$hold_to_end = array();
-		foreach ( $statuses as $key => $status ) {
-			// Unencode and set all of our psuedo term meta because we need the position if it exists
-			$unencoded_description = $this->get_unencoded_description( $status->description );
-			if ( is_array( $unencoded_description ) ) {
-				foreach( $unencoded_description as $key => $value ) {
-					$status->$key = $value;
-				}
-			}
-			// We require the position key later on (e.g. management table)
-			if ( !isset( $status->position ) )
-				$status->position = false;
-			// Only add the status to the ordered array if it has a set position and doesn't conflict with another key
-			// Otherwise, hold it for later
-			if ( $status->position && !array_key_exists( $status->position, $ordered_statuses ) ) {
-				$ordered_statuses[(int)$status->position] = $status;
-			} else {
-				$hold_to_end[] = $status;
-			}
-		}
-		// Sort the items numerically by key
-		ksort( $ordered_statuses, SORT_NUMERIC );
-		// Append all of the statuses that didn't have an existing position
-		foreach( $hold_to_end as $unpositioned_status )
-			$ordered_statuses[] = $unpositioned_status;
-
-		$this->custom_statuses_cache[ $arg_hash ] = $ordered_statuses;
-
-		return $ordered_statuses;
+		return get_posts( [
+			'post_type' => self::post_type_key,
+			'orderby' => 'title',
+			'order' => 'ASC',
+		] );
 	}
 
 	/**
 	 * Returns the a single notification object based on ID, title, or slug
+	 * TODO
 	 *
 	 * @param string|int $string_or_int The notification to search for, either by slug, name or ID
 	 * @return object|WP_Error $notification The object for the matching notification
@@ -1500,7 +1505,7 @@ jQuery(document).ready(function($) {
 		if ( 'id' == $field )
 			$field = 'term_id';
 
-		$custom_statuses = $this->get_custom_statuses();
+		$custom_statuses = $this->get_custom_notifications();
 		$custom_status = wp_filter_object_list( $custom_statuses, array( $field => $value ) );
 
 		if ( ! empty( $custom_notification ) ) {
@@ -1511,7 +1516,199 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
-	 * Generate a link to one of the custom status actions
+	 * Create a dropdown with custom statuses for use with defining notifications
+	 *
+	 * @param int $selected_status
+	 * @since 1.0
+	 */
+	function custom_status_field( $selected_status = null ) {
+		global $edit_flow;
+
+		$custom_statuses = $edit_flow->custom_status->get_custom_statuses();
+		if ( empty( $custom_statuses ) ) {
+			return array();
+		}
+
+		echo '<select id="notification_post_status" name="notification_post_status">';
+		foreach ( $custom_statuses as $status ) {
+			echo '<option value="' . esc_attr( $status->slug ) . '"';
+			echo selected( $selected_status, $status->slug );
+			echo '>' . esc_html( $status->name ) . '</option>';
+		}
+		echo '</select>';
+	}
+
+	/**
+	 * Handles a form's POST request to add a custom status
+	 *
+	 * @since 0.7
+	 */
+	function handle_add_custom_notification() {
+
+		// Check that the current POST request is our POST request
+		if ( ! isset( $_POST['submit'], $_GET['page'], $_POST['action'] )
+			|| $_GET['page'] != $this->module->settings_slug || $_POST['action'] != 'add-new' )
+				return;
+
+		if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'custom-notification-add-nonce' ) ) {
+			wp_die( $this->module->messages['nonce-failed'] );
+		}
+
+		$return = $this->save_custom_notification();
+		if ( is_wp_error( $return ) ) {
+			wp_die( __( 'Could not add custom notification: ', 'edit-flow' ) . $return->get_error_message() );
+		}
+
+		// Redirect if successful
+		$redirect_url = $this->get_link( array( 'message' => 'notification-added' ) );
+		wp_redirect( $redirect_url );
+		exit;
+
+	}
+
+	/**
+	 * Handles a POST request to edit an custom status
+	 *
+	 * @since 0.7
+	 */
+	function handle_edit_custom_notification() {
+		if ( !isset( $_POST['submit'], $_GET['page'], $_GET['action'], $_GET['notification-post-id'] )
+			|| $_GET['page'] != $this->module->settings_slug || $_GET['action'] != 'edit-notification' ) {
+				return;
+		}
+
+		if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'edit-notification' ) ) {
+			wp_die( $this->module->messages['nonce-failed'] );
+		}
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( $this->module->messages['invalid-permissions'] );
+		}
+
+		if ( ! $existing_status = $this->get_custom_notification_by( 'id', intval( $_GET['notification-post-id'] ) ) ) {
+			wp_die( $this->module->messages['notification-missing'] );
+		}
+
+		$post_id = intval( $_GET['notification-post-id'] );
+
+		$return = $this->save_custom_status( $_GET['notification-post-id'] );
+		if ( is_wp_error( $return ) ) {
+			wp_die( __( 'Error updating custom notification.', 'edit-flow' ) );
+		}
+
+		$redirect_url = $this->get_link( array( 'message' => 'notification-updated' ) );
+		wp_redirect( $redirect_url );
+		exit;
+	}
+
+	/**
+	 * Handle saving the custom notification.
+	 *
+	 * @param int $post_id
+	 * @return WP_Error | null
+	 *
+	 * @since 1.0
+	 */
+	function save_custom_notification( $post_id = 0 ) {
+		// Validate and sanitize the form data
+		$notification_name = sanitize_text_field( trim( $_POST['notification_name'] ) );
+		$notification_description = stripslashes( wp_filter_nohtml_kses( trim( $_POST['notification_description'] ) ) );
+		$notification_post_status = intval( $_POST['notification_post_status'] );
+		$notification_slack_webhook = sanitize_text_field( trim( $_POST['notification_slack_webhook'] ) );
+		$notification_api_endpoint = sanitize_text_field( trim( $_POST['notification_api_endpoint'] ) );
+
+		/**
+		 * Form validation
+		 */
+		$_REQUEST['form-errors'] = array();
+		// Check if name field was filled in
+		if( empty( $status_name ) ) {
+			$_REQUEST['form-errors']['name'] = __( 'Please enter a name for the notification', 'edit-flow' );
+		}
+
+		// Check that the status name doesn't exceed 20 chars
+		if ( strlen( $status_name ) > 20 ) {
+			$_REQUEST['form-errors']['name'] = __( 'Notification name cannot exceed 20 characters. Please try a shorter name.', 'edit-flow' );
+		}
+
+		// Check to make sure the Slack webhook is valid
+		if ( ! empty( $notification_slack_webhook ) && ! filter_var( $notification_slack_webhook, FILTER_VALIDATE_URL ) ) {
+			$_REQUEST['form-errors']['slack_webhook'] = __( "The Slack webhook isn't a valid URL.", 'edit-flow' );
+		}
+
+		// Check to make sure the API endpoint is valid
+		if ( ! empty( $notification_api_endpoint ) && ! filter_var( $notification_api_endpoint, FILTER_VALIDATE_URL ) ) {
+			$_REQUEST['form-errors']['api_endpoint'] = __( "The API endpoint isn't a valid URL.", 'edit-flow' );
+		}
+
+		// If there were any form errors, kick out and return them
+		if ( count( $_REQUEST['form-errors'] ) ) {
+			$_REQUEST['error'] = 'form-error';
+			return;
+		}
+
+		// Create or update the custom post that holds the notification
+		$result = wp_insert_post( [
+			'ID' => $post_id,
+			'post_title' => $notification_name,
+			'post_excerpt' => $notification_description,
+		] );
+
+		// Error saving the notification
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		// Add additional fields as post meta
+		update_post_meta( $result, 'post_status', $notification_post_status );
+		update_post_meta( $result, 'slack_webhook', $notification_slack_webhook );
+		update_post_meta( $result, 'api_endpoint', $notification_api_endpoint );
+
+		return true;
+	}
+
+	/**
+	 * Handles a GET request to delete a specific term
+	 *
+	 * @since 1.0
+	 */
+	function handle_delete_custom_notification() {
+
+		// Check that this GET request is our GET request
+		if ( !isset( $_GET['page'], $_GET['action'], $_GET['notification-post-id'], $_GET['nonce'] )
+			|| $_GET['page'] != $this->module->settings_slug || $_GET['action'] != 'delete-notification' )
+			return;
+
+		// Check for proper nonce
+		if ( ! wp_verify_nonce( $_GET['nonce'], 'delete-notification' ) ) {
+			wp_die( __( 'Invalid nonce for submission.', 'edit-flow' ) );
+		}
+
+		// Only allow users with the proper caps
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( __( 'Sorry, you do not have permission to delete custom notifications.', 'edit-flow' ) );
+		}
+
+		// Check to make sure the status isn't already deleted
+		$post_id = intval( $_GET['notification-post-id'] );
+		$post = $this->get_custom_notification_by( 'id', $post_id );
+		if ( ! $post ) {
+ 			wp_die( __( 'Custom notification does not exist.', 'edit-flow' ) );
+ 		}
+
+ 		$result = wp_delete_post( $post_id, true );
+
+		if ( is_wp_error( $result ) ) {
+			wp_die( __( 'Could not delete the custom notification: ', 'edit-flow' ) . $return->get_error_message() );
+		}
+
+		$redirect_url = $this->get_link( array( 'message' => 'notification-deleted' ) );
+		wp_redirect( $redirect_url );
+		exit;
+	}
+
+	/**
+	 * Generate a link to one of the custom notification actions
 	 *
 	 * @since 1.0
 	 *
@@ -1628,7 +1825,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	}
 
 	/**
-	 * Displayed column showing the name of the status
+	 * Displayed column showing the name of the notification
 	 *
 	 * @since 1.0
 	 *
@@ -1638,33 +1835,28 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	function column_name( $item ) {
 		global $edit_flow;
 
-		$item_edit_link = esc_url( $edit_flow->custom_status->get_link( array( 'action' => 'edit-status', 'term-id' => $item->term_id ) ) );
+		$item_edit_link = esc_url( $edit_flow->notification->get_link( array( 'action' => 'edit-notification', 'notification-post-id' => $item->ID ) ) );
 
-		$output = '<strong><a href="' . $item_edit_link . '">' . esc_html( $item->name ) . '</a>';
+		$output = '<strong><a href="' . $item_edit_link . '">' . esc_html( $item->post_title ) . '</a></strong>';
 		if ( $item->slug == $this->default_status )
-			$output .= ' - ' . __( 'Default', 'edit-flow' );
-		$output .= '</strong>';
 
 		// Don't allow for any of these status actions when adding a new custom status
-		if ( isset( $_GET['action'] ) && $_GET['action'] == 'add' )
+		if ( isset( $_GET['action'] ) && $_GET['action'] == 'add' ) {
 			return $output;
+		}
 
 		$actions = array();
 		$actions['edit'] = "<a href='$item_edit_link'>" . __( 'Edit', 'edit-flow' ) . "</a>";
-		$actions['delete delete-status'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->custom_status->get_link( array( 'action' => 'delete-status', 'term-id' => $item->term_id ) ) );
+		$actions['delete delete-status'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->notification->get_link( array( 'action' => 'delete-notification', 'notification-post-id' => $item->ID ) ) );
 
 		$output .= $this->row_actions( $actions, false );
-		$output .= '<div class="hidden" id="inline_' . esc_attr( $item->term_id ) . '">';
-		$output .= '<div class="name">' . esc_html( $item->name ) . '</div>';
-		$output .= '<div class="description">' . esc_html( $item->description ) . '</div>';
-		$output .= '</div>';
 
 		return $output;
 
 	}
 
 	/**
-	 * Displayed column showing the description of the status
+	 * Displayed column showing the description of the notification
 	 *
 	 * @since 1.0
 	 *
@@ -1672,7 +1864,19 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	 * @return string $output What will be rendered
 	 */
 	function column_description( $item ) {
-		return esc_html( $item->description );
+		return esc_html( $item->post_excerpt );
+	}
+
+	/**
+	 * Displayed column showing the post type of the notification
+	 *
+	 * @since 1.0
+	 *
+	 * @param object $item Custom status as an object
+	 * @return string $output What will be rendered
+	 */
+	function column_post_status( $item ) {
+		return esc_html( get_post_meta( $item->ID, 'post_status' ) );
 	}
 
 	/**
@@ -1685,7 +1889,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 		$alternate_class = ( $alternate_class == '' ? ' alternate' : '' );
 		$row_class = ' class="term-static' . $alternate_class . '"';
 
-		echo '<tr id="term-' . $item->term_id . '"' . $row_class . '>';
+		echo '<tr id="notification-' . $item->ID . '"' . $row_class . '>';
 		echo $this->single_row_columns( $item );
 		echo '</tr>';
 	}
