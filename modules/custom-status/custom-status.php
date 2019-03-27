@@ -221,6 +221,26 @@ class EF_Custom_Status extends EF_Module {
 	}
 
 	/**
+	 * Allow interoperability with custom notifications
+	 *
+	 * @param object $module Module's data
+	 * @return array $post_types All of the post types that are 'on'
+	 *
+	 * @since 1.0
+	 */
+	function get_post_types_for_module( $module ) {
+
+		$post_types = parent::get_post_types_for_module( $module );
+		if ( ! is_array( $post_types ) ) {
+			$post_types = array();
+		}
+
+		$post_types[] = EF_Notifications::post_type_key;
+
+		return $post_types;
+	}
+
+	/**
 	 * Makes the call to register_post_status to register the user's custom statuses.
 	 * Also unregisters draft and pending, in case the user doesn't want them.
 	 */
@@ -234,12 +254,13 @@ class EF_Custom_Status extends EF_Module {
 		if ( !taxonomy_exists( self::taxonomy_key ) ) {
 			$args = array(	'hierarchical' => false,
 							'update_count_callback' => '_update_post_term_count',
-							'label' => false,
+							'label' => 'post_status',
 							'query_var' => false,
 							'rewrite' => false,
-							'show_ui' => false
+							'show_ui' => false,
+							'public' => false,
 					);
-			register_taxonomy( self::taxonomy_key, 'post', $args );
+			register_taxonomy( self::taxonomy_key, array( 'post', 'custom_notification' ), $args );
 		}
 
 		if ( function_exists( 'register_post_status' ) ) {
