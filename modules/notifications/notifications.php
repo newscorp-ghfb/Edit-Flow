@@ -1316,7 +1316,7 @@ jQuery(document).ready(function($) {
 	function print_configure_view() {
 		global $edit_flow;
 
-		/** Full width view for editing a custom status **/
+		/** Full width view for editing a custom notification **/
 		if ( isset( $_GET['action'], $_GET['notification-post-id'] ) && 'edit-notification' === $_GET['action'] ): ?>
 		<?php
 			// Check whether the term exists
@@ -1545,7 +1545,7 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
-	 * Handles a form's POST request to add a custom status
+	 * Handles a form's POST request to add a custom notification
 	 *
 	 * @since 0.7
 	 */
@@ -1576,7 +1576,7 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
-	 * Handles a POST request to edit an custom status
+	 * Handles a POST request to edit an custom notification
 	 *
 	 * @since 0.7
 	 */
@@ -1635,7 +1635,7 @@ jQuery(document).ready(function($) {
 			$_REQUEST['form-errors']['name'] = __( 'Please enter a name for the notification', 'edit-flow' );
 		}
 
-		// Check that the status name doesn't exceed 20 chars
+		// Check that the notification name doesn't exceed 20 chars
 		if ( strlen( $notification_name ) > 20 ) {
 			$_REQUEST['form-errors']['name'] = __( 'Notification name cannot exceed 20 characters. Please try a shorter name.', 'edit-flow' );
 		}
@@ -1700,7 +1700,7 @@ jQuery(document).ready(function($) {
 			wp_die( __( 'Sorry, you do not have permission to delete custom notifications.', 'edit-flow' ) );
 		}
 
-		// Check to make sure the status isn't already deleted
+		// Check to make sure the notification isn't already deleted
 		$post_id = intval( $_GET['notification-post-id'] );
 		$post = $this->get_custom_notification_by( 'id', $post_id );
 		if ( ! $post ) {
@@ -1822,25 +1822,11 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	}
 
 	/**
-	 * Fallback column callback.
-	 * Primarily used to display post count for each post type
-	 *
-	 * @since 1.0
-	 *
-	 * @param object $item Custom status as an object
-	 * @param string $column_name Name of the column as registered in $this->prepare_items()
-	 * @return string $output What will be rendered
-	 */
-	function column_default( $item, $column_name ) {
-		// Probably don't need this?
-	}
-
-	/**
 	 * Displayed column showing the name of the notification
 	 *
 	 * @since 1.0
 	 *
-	 * @param object $item Custom status as an object
+	 * @param object $item Custom notification as an object
 	 * @return string $output What will be rendered
 	 */
 	function column_name( $item ) {
@@ -1851,14 +1837,14 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 		$output = '<strong><a href="' . $item_edit_link . '">' . esc_html( $item->post_title ) . '</a></strong>';
 		if ( $item->slug == $this->default_status )
 
-		// Don't allow for any of these status actions when adding a new custom status
+		// Don't allow for any of these notification actions when adding a new custom notification
 		if ( isset( $_GET['action'] ) && $_GET['action'] == 'add' ) {
 			return $output;
 		}
 
 		$actions = array();
 		$actions['edit'] = "<a href='$item_edit_link'>" . __( 'Edit', 'edit-flow' ) . "</a>";
-		$actions['delete delete-status'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->notifications->get_link( array( 'action' => 'delete-notification', 'notification-post-id' => $item->ID ) ) );
+		$actions['delete delete-notification'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->notifications->get_link( array( 'action' => 'delete-notification', 'notification-post-id' => $item->ID ) ) );
 
 		$output .= $this->row_actions( $actions, false );
 
@@ -1871,7 +1857,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	 *
 	 * @since 1.0
 	 *
-	 * @param object $item Custom status as an object
+	 * @param object $item Custom notification as an object
 	 * @return string $output What will be rendered
 	 */
 	function column_description( $item ) {
@@ -1883,7 +1869,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	 *
 	 * @since 1.0
 	 *
-	 * @param object $item Custom status as an object
+	 * @param object $item Custom notification as an object
 	 * @return string $output What will be rendered
 	 */
 	function column_post_status( $item ) {
@@ -1897,7 +1883,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	}
 
 	/**
-	 * Prepare and echo a single custom status row
+	 * Prepare and echo a single custom notification row
 	 *
 	 * @since 1.0
 	 */
