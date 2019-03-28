@@ -1679,8 +1679,6 @@ jQuery(document).ready(function($) {
 	function custom_status_field( $selected_status = null ) {
 		global $edit_flow;
 
-		error_log( $selected_status );
-
 		$custom_statuses = $edit_flow->custom_status->get_custom_statuses();
 		if ( empty( $custom_statuses ) ) {
 			return array();
