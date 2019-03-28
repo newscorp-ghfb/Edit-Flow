@@ -1389,6 +1389,9 @@ jQuery(document).ready(function($) {
 		$wp_list_table = new EF_Custom_Notification_List_Table();
 		$wp_list_table->prepare_items();
 		?>
+		<script type="text/javascript">
+			var ef_confirm_delete_notification_string = "<?php echo esc_js( __( 'Are you sure you want to delete this notification?', 'edit-flow' ) ); ?>";
+		</script>
 			<div id="col-right">
 				<div class="col-wrap">
 					<?php $wp_list_table->display(); ?>

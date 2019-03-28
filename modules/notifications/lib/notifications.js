@@ -1,17 +1,17 @@
 jQuery(document).ready(function($) {
-	$('#ef-post_following_users_box ul').listFilterizer();	
+	$('#ef-post_following_users_box ul').listFilterizer();
 
 	var params = {
 		action: 'save_notifications',
 		post_id: $('#post_ID').val(),
 	};
-	
+
 	var toggle_warning_badges = function( container, response ) {
 		// Remove any existing badges
 		if ( $( container ).siblings( 'span' ).length ) {
 			$( container ).siblings( 'span' ).remove();
 		}
-		
+
 		// "No Access" If this user was flagged as not having access
 		var user_has_no_access = response.data.subscribers_with_no_access.includes( parseInt( $( container ).val() ) );
 		if ( user_has_no_access ) {
@@ -29,6 +29,12 @@ jQuery(document).ready(function($) {
 			warning_background = true;
 		}
 	}
+
+	$('.delete-notification a').click(function(){
+		if ( ! confirm( ef_confirm_delete_notification_string ) ) {
+			return false;
+		}
+	});
 
 	$(document).on('click','.ef-post_following_list li input:checkbox, .ef-following_usergroups li input:checkbox', function() {
 		var user_group_ids = [];
@@ -50,10 +56,10 @@ jQuery(document).ready(function($) {
 			url : (ajaxurl) ? ajaxurl : wpListL10n.url,
 			data : params,
 
-			success : function( response ) { 
+			success : function( response ) {
 				// Reset background color (set during toggle_warning_badges if there's a warning)
 				warning_background = false;
-				
+
 				// Toggle the warning badges ("No Access" and "No Email") to signal the user won't receive notifications
 				if ( undefined !== response.data ) {
 					toggle_warning_badges( $( parent_this ), response );
@@ -68,11 +74,11 @@ jQuery(document).ready(function($) {
 				$(parent_this.parents('li'))
 					.animate( { 'backgroundColor': backgroundHighlightColor }, 200 )
 					.animate( { 'backgroundColor':backgroundColor }, 200 );
-			  
+
 				// This event is used to show an updated list of who will be notified of editorial comments and status updates.
 				$( '#ef-post_following_box' ).trigger( 'following_list_updated' );
 			},
-			error : function(r) { 
+			error : function(r) {
 				$('#ef-post_following_users_box').prev().append(' <p class="error">There was an error. Please reload the page.</p>');
 			}
 		});
