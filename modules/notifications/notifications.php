@@ -48,7 +48,7 @@ class EF_Notifications extends EF_Module {
 			),
 			'messages' => array(
 				'notifcation-added' => __( 'Custom notification created.', 'edit-flow' ),
-				'notifcation-missing' => __( "Custom notification doesn't exist.", 'edit-flow' ),
+				'notification-missing' => __( "Custom notification doesn't exist.", 'edit-flow' ),
 				'post-updated' => __( "Custom notification updated.", 'edit-flow' ),
 				'notifcation-deleted' => __( 'Custom notification deleted.', 'edit-flow' ),
 			),
@@ -1317,25 +1317,24 @@ jQuery(document).ready(function($) {
 		global $edit_flow;
 
 		/** Full width view for editing a custom status **/
-		if ( isset( $_GET['action'], $_GET['post-id'] ) && $_GET['action'] == 'edit-custom-notification' ): ?>
+		if ( isset( $_GET['action'], $_GET['notification-post-id'] ) && 'edit-notification' === $_GET['action'] ): ?>
 		<?php
 			// Check whether the term exists
 			$post_id = intval( $_GET['notification-post-id'] );
-			$notification = $this->get_custom_notification_by( 'id', $post_id  );  // TODO
-			if ( ! $status ) {
-				echo '<div class="error"><p>' . $this->module->messages['notification-missing'] . '</p></div>'; // TODO
+			$notification = $this->get_custom_notification_by( 'id', $post_id  );
+			if ( ! $notification ) {
+				echo '<div class="error"><p>' . $this->module->messages['notification-missing'] . '</p></div>';
 				return;
 			}
-			$edit_notification_link = $this->get_link( array( 'action' => 'edit-status', 'notification-post-id' => $post_id ) ); // TODO ?
+			$edit_notification_link = $this->get_link( array( 'action' => 'edit-notification', 'notification-post-id' => $post_id ) );
 
-			$name = ( isset( $_POST['notification_name'] ) ) ? stripslashes( $_POST['notification_name'] ) : $notification->name;
-			$description = ( isset( $_POST['notification_description'] ) ) ? strip_tags( stripslashes( $_POST['notification_description'] ) ) : $notification->description;
+			$name = ( isset( $_POST['notification_name'] ) ) ? stripslashes( $_POST['notification_name'] ) : $notification->post_title;
+			$description = ( isset( $_POST['notification_description'] ) ) ? strip_tags( stripslashes( $_POST['notification_description'] ) ) : $notification->post_excerpt;
 			$selected_status = ( isset( $_POST['notification_post_status'] ) ) ? strip_tags( stripslashes( $_POST['notification_post_status'] ) ) : $notification->post_status;
 			$slack_webhook = ( isset( $_POST['notification_slack_webhook'] ) ) ? strip_tags( stripslashes( $_POST['notification_slack_webhook'] ) ) : $notification->slack_webhook;
 			$api_endpoint = ( isset( $_POST['notification_api_endpoint'] ) ) ? strip_tags( stripslashes( $_POST['notification_api_endpoint'] ) ) : $notification->api_endpoint;
 		?>
 
-		<div id="ajax-response"></div>
 		<form method="post" action="<?php echo esc_attr( $edit_notification_link ); ?>" >
 		<input type="hidden" name="notification-post-id" value="<?php echo esc_attr( $post_id ); ?>" />
 		<?php
@@ -1373,6 +1372,7 @@ jQuery(document).ready(function($) {
 			</tr>
 			<tr class="form-field">
 				<th scope="row" valign="top"><label for="notification_api_endpoint"><?php esc_html_e( 'API Endpoint', 'edit-flow' ); ?></label></th>
+				<td>
 					<input type="text" size="40" id="notification_api_endpoint" name="notification_api_endpoint" value="<?php echo esc_attr( $api_endpoint ) ?>" />
 					<?php $edit_flow->settings->helper_print_error_or_description( 'api-endpoint', __( 'Add a remote API endpoint to receive push notifications', 'edit-flow' ) ); ?>
 				</td>
@@ -1600,7 +1600,7 @@ jQuery(document).ready(function($) {
 
 		$post_id = intval( $_GET['notification-post-id'] );
 
-		$return = $this->save_custom_status( $_GET['notification-post-id'] );
+		$return = $this->save_custom_notification( $_GET['notification-post-id'] );
 		if ( is_wp_error( $return ) ) {
 			wp_die( __( 'Error updating custom notification.', 'edit-flow' ) );
 		}
@@ -1658,6 +1658,7 @@ jQuery(document).ready(function($) {
 
 		// Create or update the custom post that holds the notification
 		$result = wp_insert_post( [
+			'ID' => $post_id,
 			'post_title' => $notification_name,
 			'post_excerpt' => $notification_description,
 			'post_type' => self::post_type_key,
