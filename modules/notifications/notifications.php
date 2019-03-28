@@ -719,15 +719,13 @@ jQuery(document).ready(function($) {
 				$body .= sprintf( __( 'Author: %1$s (%2$s)', 'edit-flow' ), $post_author->display_name, $post_author->user_email ) . "\r\n";
 			}
 
-			$edit_link = htmlspecialchars_decode( get_edit_post_link( $post_id ) );
-			if ( $new_status != 'publish' ) {
-				$view_link = add_query_arg( array( 'preview' => 'true' ), wp_get_shortlink( $post_id ) );
-			} else {
-				$view_link = htmlspecialchars_decode( get_permalink( $post_id ) );
-			}
+			$edit_link = $this->get_edit_link( $post_id );
+			$view_link = $this->get_view_link( $post_id );
+			$comment_link = $this->get_comment_link( $post_id );
+
 			$body .= "\r\n";
 			$body .= __( '== Actions ==', 'edit-flow' ) . "\r\n";
-			$body .= sprintf( __( 'Add editorial comment: %s', 'edit-flow' ), $edit_link . '#editorialcomments/add' ) . "\r\n";
+			$body .= sprintf( __( 'Add editorial comment: %s', 'edit-flow' ), $comment_link ) . "\r\n";
 			$body .= sprintf( __( 'Edit: %s', 'edit-flow' ), $edit_link ) . "\r\n";
 			$body .= sprintf( __( 'View: %s', 'edit-flow' ), $view_link ) . "\r\n";
 
@@ -808,13 +806,14 @@ jQuery(document).ready(function($) {
 			$body .= esc_html__( 'Notified', 'edit-flow' ) . ": " . esc_html( $notification_list ) . "\n";
 		}
 
-		$edit_link = htmlspecialchars_decode( get_edit_post_link( $post_id ) );
-		$view_link = htmlspecialchars_decode( get_permalink( $post_id ) );
+		$edit_link = $this->get_edit_link( $post_id );
+		$view_link = $this->get_view_link( $post_id );
+		$comment_link = $this->get_comment_link( $post_id );
 
 		$body .= "\r\n";
 		$body .= __( '== Actions ==', 'edit-flow' ) . "\r\n";
 		$body .= sprintf( __( 'Reply: %s', 'edit-flow' ), $edit_link . '#editorialcomments/reply/' . $comment->comment_ID ) . "\r\n";
-		$body .= sprintf( __( 'Add editorial comment: %s', 'edit-flow' ), $edit_link . '#editorialcomments/add' ) . "\r\n";
+		$body .= sprintf( __( 'Add editorial comment: %s', 'edit-flow' ), $comment_link ) . "\r\n";
 		$body .= sprintf( __( 'Edit: %s', 'edit-flow' ), $edit_link ) . "\r\n";
 		$body .= sprintf( __( 'View: %s', 'edit-flow' ), $view_link ) . "\r\n";
 
@@ -860,9 +859,9 @@ jQuery(document).ready(function($) {
 				$this->send_to_slack( $notification->slack_webhook, $message );
 			}
 
-			/*if ( ! empty( $notification->api_endpoint ) && filter_var( $notification->api_endpoint, FILTER_VALIDATE_URL ) ) {
+			if ( ! empty( $notification->api_endpoint ) && filter_var( $notification->api_endpoint, FILTER_VALIDATE_URL ) ) {
 				$this->send_to_api( $notification->api_endpoint, $message, $action, $post );
-			}*/
+			}
 		}
 	}
 
@@ -881,6 +880,72 @@ jQuery(document).ready(function($) {
 				'text' => $message,
 			] ),
 		] );
+	}
+
+	/**
+	 * Send a notification to any arbitrary API endpoint
+	 *
+	 * @param string $api_endpoint
+	 * @param string $message
+	 * @param string $action
+	 * @param WP_Post $post
+	 */
+	function send_to_api( $webhook_url, $message, $action, $post ) {
+		// Build a filterable array of data to send
+		$data = apply_filters( 'ef_notification_send_to_api_data', [
+			'message' => $message,
+			'action' => $action,
+			'ID' => $post->ID,
+			'title' => $post->post_title,
+			'links' => [
+				'view' => $this->get_view_link( $post->ID ),
+				'edit' => $this->get_edit_link( $post->ID ),
+			],
+		], $message, $action, $post );
+
+		wp_remote_post( $webhook_url, [
+			'headers' => [
+				'content_type' => 'application/json',
+			],
+			'body' => wp_json_encode( $data ),
+		] );
+	}
+
+	/**
+	 * Get the edit post link
+	 *
+	 * @param int $post_id
+	 * @return string
+	 */
+	function get_edit_link( $post_id ) {
+		return htmlspecialchars_decode( get_edit_post_link( $post_id ) );
+	}
+
+	/**
+	 * Get the view post link
+	 *
+	 * @param int $post_id
+	 * @param string $post_status
+	 * @return string
+	 */
+	function get_view_link( $post_id, $post_status = null ) {
+		if ( $post_status != 'publish' ) {
+			$view_link = add_query_arg( array( 'preview' => 'true' ), wp_get_shortlink( $post_id ) );
+		} else {
+			$view_link = htmlspecialchars_decode( get_permalink( $post_id ) );
+		}
+
+		return $view_link;
+	}
+
+	/**
+	 * Get the link to leave an editorial comment
+	 *
+	 * @param int $post_id
+	 * @return string
+	 */
+	function get_comment_link( $post_id ) {
+		return $this->get_edit_link( $post_id ) . '#editorialcomments/add';
 	}
 
 	/**
