@@ -617,7 +617,6 @@ jQuery(document).ready(function($) {
 
 	/**
 	 * Set up and send post status change notifications
-	 * TODO - add slack/api pushes
 	 */
 	function notification_status_change( $new_status, $old_status, $post ) {
 		global $edit_flow;
@@ -732,9 +731,14 @@ jQuery(document).ready(function($) {
 			$body .= sprintf( __( 'Edit: %s', 'edit-flow' ), $edit_link ) . "\r\n";
 			$body .= sprintf( __( 'View: %s', 'edit-flow' ), $view_link ) . "\r\n";
 
-			$body .= $this->get_notification_footer($post);
+			// Send custom notifications
+			$this->send_custom_notifications( 'status-change', $post, $body );
 
-			$this->send_email( 'status-change', $post, $subject, $body );
+			// Create a separate email body since other types of notifications don't need the footer
+			$email_body = $body;
+			$email_body .= $this->get_notification_footer($post);
+
+			$this->send_email( 'status-change', $post, $subject, $email_body );
 		}
 
 	}
@@ -834,6 +838,52 @@ jQuery(document).ready(function($) {
 	}
 
 	/**
+	 * Send custom notifications
+	 *
+	 * @param string $action
+	 * @param WP_Post $post
+	 * @param string $message
+	 */
+	function send_custom_notifications( $action, $post, $message ) {
+		// Allow filtering of the message body
+		$message = apply_filters( 'ef_custom_notification_message', $message, $action, $post );
+
+		// See if any notifications exist for the current post status
+		$notifications = $this->get_notifications( $post );
+		if ( empty( $notifications ) || ! is_array( $notifications ) ) {
+			return;
+		}
+
+		// Iterate and send
+		foreach ( $notifications as $notification ) {
+			if ( ! empty( $notification->slack_webhook ) && filter_var( $notification->slack_webhook, FILTER_VALIDATE_URL ) ) {
+				$this->send_to_slack( $notification->slack_webhook, $message );
+			}
+
+			/*if ( ! empty( $notification->api_endpoint ) && filter_var( $notification->api_endpoint, FILTER_VALIDATE_URL ) ) {
+				$this->send_to_api( $notification->api_endpoint, $message, $action, $post );
+			}*/
+		}
+	}
+
+	/**
+	 * Send a notification to Slack
+	 *
+	 * @param string $webhook_url
+	 * @param string $message
+	 */
+	function send_to_slack( $webhook_url, $message ) {
+		wp_remote_post( $webhook_url, [
+			'headers' => [
+				'content_type' => 'application/json',
+			],
+			'body' => wp_json_encode( [
+				'text' => $message,
+			] ),
+		] );
+	}
+
+	/**
 	 * send_email()
 	 */
 	function send_email( $action, $post, $subject, $message, $message_headers = '' ) {
@@ -888,6 +938,38 @@ jQuery(document).ready(function($) {
 	 */
 	function send_single_email( $to, $subject, $message, $message_headers = '' ) {
 		wp_mail( $to, $subject, $message, $message_headers );
+	}
+
+	/**
+	 * Get all notifications for the current post status
+	 *
+	 * @param WP_Post $post
+	 * @return array
+	 */
+	function get_notifications( $post ) {
+		// Query for notifications
+		$notification_posts = get_posts( [
+			'post_type' => self::post_type_key,
+			'meta_key' => 'post_status',
+			'meta_value' => $post->post_status,
+			'posts_per_page' => '200', // arbitrarily high
+			'offset' => 0,
+		] );
+
+		// Build an array of objects that's useful for the calling function
+		$notifications = array();
+		foreach ( $notification_posts as $notification ) {
+			$data = new stdClass();
+			$data->name = $notification->post_title;
+			$data->description = $notification->post_excerpt;
+			$data->post_status = get_post_meta( $notification->ID, 'post_status', true );
+			$data->slack_webhook = get_post_meta( $notification->ID, 'slack_webhook', true );
+			$data->api_endpoint = get_post_meta( $notification->ID, 'api_endpoint', true );
+
+			$notifications[] = $data;
+		}
+
+		return $notifications;
 	}
 
 	/**
@@ -1330,7 +1412,7 @@ jQuery(document).ready(function($) {
 
 			$name = ( isset( $_POST['notification_name'] ) ) ? stripslashes( $_POST['notification_name'] ) : $notification->post_title;
 			$description = ( isset( $_POST['notification_description'] ) ) ? strip_tags( stripslashes( $_POST['notification_description'] ) ) : $notification->post_excerpt;
-			$selected_status = ( isset( $_POST['notification_post_status'] ) ) ? strip_tags( stripslashes( $_POST['notification_post_status'] ) ) : $notification->post_status;
+			$selected_status = ( isset( $_POST['notification_post_status'] ) ) ? strip_tags( stripslashes( $_POST['notification_post_status'] ) ) : get_post_meta( $notification->ID, 'post_status', true );
 			$slack_webhook = ( isset( $_POST['notification_slack_webhook'] ) ) ? strip_tags( stripslashes( $_POST['notification_slack_webhook'] ) ) : $notification->slack_webhook;
 			$api_endpoint = ( isset( $_POST['notification_api_endpoint'] ) ) ? strip_tags( stripslashes( $_POST['notification_api_endpoint'] ) ) : $notification->api_endpoint;
 		?>
@@ -1493,7 +1575,6 @@ jQuery(document).ready(function($) {
 
 	/**
 	 * Returns the a single notification object based on ID, title, or slug
-	 * TODO
 	 *
 	 * @param string|int $string_or_int The notification to search for, either by slug, name or ID
 	 * @return object|WP_Error $notification The object for the matching notification
@@ -1533,6 +1614,8 @@ jQuery(document).ready(function($) {
 	function custom_status_field( $selected_status = null ) {
 		global $edit_flow;
 
+		error_log( $selected_status );
+
 		$custom_statuses = $edit_flow->custom_status->get_custom_statuses();
 		if ( empty( $custom_statuses ) ) {
 			return array();
@@ -1541,7 +1624,7 @@ jQuery(document).ready(function($) {
 		echo '<select id="notification_post_status" name="notification_post_status">';
 		foreach ( $custom_statuses as $status ) {
 			echo '<option value="' . esc_attr( $status->slug ) . '"';
-			echo selected( $selected_status, $status->slug );
+			echo selected( $selected_status, $status->slug, false );
 			echo '>' . esc_html( $status->name ) . '</option>';
 		}
 		echo '</select>';
