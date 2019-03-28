@@ -3,6 +3,7 @@
  * class EF_Notifications
  * Notifications for Edit Flow and more
  * TODO - need to disable custom notifications if custom statuses are disabled
+ * TODO - add a Google Sheets integration
  */
 
 if( ! defined( 'EF_NOTIFICATION_USE_CRON' ) )
@@ -20,6 +21,8 @@ class EF_Notifications extends EF_Module {
 	var $module;
 
 	var $edit_post_subscriptions_cap = 'edit_post_subscriptions';
+
+	var $notification_taxonomy;
 
 	// This is post type name used to store all our custom notifications
 	const post_type_key = 'custom_notification';
@@ -70,6 +73,9 @@ class EF_Notifications extends EF_Module {
 	 * Initialize the notifications class if the plugin is enabled
 	 */
 	function init() {
+
+		// Set the taxonomy used for custom notifications
+		$this->notification_taxonomy = apply_filters( 'ef_notification_taxonomy', 'category' );
 
 		// Register custom post type for managing custom notifications
 		$this->register_post_types();
@@ -249,7 +255,7 @@ class EF_Notifications extends EF_Module {
 				'supports' => [ 'title', 'excerpt' ],
 				'show_in_rest' => true,
 				'rest_base' => 'ef_custom_notification',
-				'taxonomies' => array( EF_Custom_Status::taxonomy_key ),
+				'taxonomies' => array( EF_Custom_Status::taxonomy_key, $this->notification_taxonomy ),
 			]
 		);
 	}
@@ -1012,22 +1018,74 @@ jQuery(document).ready(function($) {
 	 * @return array
 	 */
 	function get_notifications( $post ) {
-		// Query for notifications
-		$notification_posts = get_posts( [
+		// Query for notifications based solely on post status
+		$notification_post_query = new WP_Query( [
 			'post_type' => self::post_type_key,
-			'meta_key' => 'post_status',
-			'meta_value' => $post->post_status,
+			'meta_query' => [
+				'relation' => 'AND',
+				[
+					'key' => 'post_status',
+					'value' => $post->post_status,
+					'compare' => '=',
+				],
+				[
+					'key'     => 'no_terms',
+					'value'   => true,
+					'compare' => 'EXISTS',
+				],
+			],
 			'posts_per_page' => '200', // arbitrarily high
 			'offset' => 0,
 		] );
 
+		$notification_posts = $notification_post_query->get_posts();
+
+		if ( empty( $notification_posts ) ) {
+			$notification_posts = array();
+		}
+
+		// Query for notifications based on terms, if applicable
+		$terms = get_the_terms( $post->ID, $this->notification_taxonomy );
+
+		if ( ! empty( $terms ) ) {
+			$notification_tax_posts_query = new WP_Query( [
+				'post_type' => self::post_type_key,
+				'meta_query' => [
+					[
+						'key' => 'post_status',
+						'value' => $post->post_status,
+						'compare' => '=',
+					],
+				],
+				'tax_query' => [
+					[
+						'taxonomy' => $this->notification_taxonomy,
+						'field'    => 'term_id',
+						'terms'    => wp_list_pluck( $terms, 'term_id' ),
+						'operator' => 'IN',
+					],
+				],
+				'posts_per_page' => '200', // arbitrarily high
+				'offset' => 0,
+			] );
+
+			$notification_tax_posts = $notification_tax_posts_query->get_posts();
+
+			if ( ! empty( $notification_tax_posts ) && is_array( $notification_tax_posts ) ) {
+				$notification_posts = array_merge( $notification_posts, $notification_tax_posts );
+				$notification_posts = array_unique( $notification_posts );
+			}
+		}
+
 		// Build an array of objects that's useful for the calling function
 		$notifications = array();
+
 		foreach ( $notification_posts as $notification ) {
 			$data = new stdClass();
 			$data->name = $notification->post_title;
 			$data->description = $notification->post_excerpt;
 			$data->post_status = get_post_meta( $notification->ID, 'post_status', true );
+			$data->term = $this->get_notification_term( $notification->ID );
 			$data->slack_webhook = get_post_meta( $notification->ID, 'slack_webhook', true );
 			$data->api_endpoint = get_post_meta( $notification->ID, 'api_endpoint', true );
 
@@ -1478,6 +1536,7 @@ jQuery(document).ready(function($) {
 			$name = ( isset( $_POST['notification_name'] ) ) ? stripslashes( $_POST['notification_name'] ) : $notification->post_title;
 			$description = ( isset( $_POST['notification_description'] ) ) ? strip_tags( stripslashes( $_POST['notification_description'] ) ) : $notification->post_excerpt;
 			$selected_status = ( isset( $_POST['notification_post_status'] ) ) ? strip_tags( stripslashes( $_POST['notification_post_status'] ) ) : get_post_meta( $notification->ID, 'post_status', true );
+			$selected_term = ( isset( $_POST['notification_term'] ) ) ? strip_tags( stripslashes( $_POST['notification_term'] ) ) : $this->get_notification_term( $notification->ID );
 			$slack_webhook = ( isset( $_POST['notification_slack_webhook'] ) ) ? strip_tags( stripslashes( $_POST['notification_slack_webhook'] ) ) : $notification->slack_webhook;
 			$api_endpoint = ( isset( $_POST['notification_api_endpoint'] ) ) ? strip_tags( stripslashes( $_POST['notification_api_endpoint'] ) ) : $notification->api_endpoint;
 		?>
@@ -1505,9 +1564,19 @@ jQuery(document).ready(function($) {
 			<tr class="form-field">
 				<th scope="row" valign="top"><label for="notification_post_status"><?php esc_html_e( 'Post Status', 'edit-flow' ); ?></label></th>
 				<td><?php
-						$this->custom_status_field( $selected_status );
+						$this->custom_status_dropdown( $selected_status );
 					?>
 					<?php $edit_flow->settings->helper_print_error_or_description( 'post-status', __( 'Choose a custom post status that triggers this notification.', 'edit-flow' ) ); ?>
+				</td>
+			</tr>
+			<tr class="form-field">
+				<th scope="row" valign="top"><label for="notification_term"><?php echo esc_html( $this->get_notification_taxonomy_name() ) ?></label></th>
+				<td>
+				<?php
+					$this->get_notification_taxonomy_dropdown( $selected_term );
+					$edit_flow->settings->helper_print_error_or_description( 'term', __( 'Choose a term that triggers this notification.', 'edit-flow' ) );
+
+				?>
 				</td>
 			</tr>
 			<tr class="form-field">
@@ -1542,7 +1611,7 @@ jQuery(document).ready(function($) {
 			<div id="col-right">
 				<div class="col-wrap">
 					<?php $wp_list_table->display(); ?>
-					<p class="description" style="padding-top:10px;"><?php esc_html_e( 'Something about notifications here...', 'edit-flow' ); ?></p>
+					<p class="description" style="padding-top:10px;"><?php esc_html_e( 'Configure custom notifications that are triggered automatically on post status changes', 'edit-flow' ); ?></p>
 				</div>
 			</div>
 			<div id="col-left">
@@ -1578,9 +1647,17 @@ jQuery(document).ready(function($) {
 						<label for="notification_post_status"><?php esc_html_e( 'Post Status', 'edit-flow' ); ?></label>
 						<?php
 							$selected_status = ( ! empty( $_POST['notification_post_status'] ) ) ? sanitize_text_field( $_POST['notification_post_status'] ) : null;
-							$this->custom_status_field( $selected_status );
+							$this->custom_status_dropdown( $selected_status );
 						?>
 						<?php $edit_flow->settings->helper_print_error_or_description( 'post-status', __( 'Choose a custom post status that triggers this notification.', 'edit-flow' ) ); ?>
+					</div>
+					<div class="form-field">
+						<label for="notification_term"><?php echo esc_html( $this->get_notification_taxonomy_name() ) ?></label>
+						<?php
+							$selected_term = ( ! empty( $_POST['notification_term'] ) ) ? intval( $_POST['notification_term'] ) : null;
+							$this->get_notification_taxonomy_dropdown( $selected_term );
+						?>
+						<?php $edit_flow->settings->helper_print_error_or_description( 'term', __( 'Choose a term that triggers this notification.', 'edit-flow' ) ); ?>
 					</div>
 					<div class="form-field">
 						<label for="notification_slack_webhook"><?php esc_html_e( 'Slack Webhook', 'edit-flow' ); ?></label>
@@ -1676,7 +1753,7 @@ jQuery(document).ready(function($) {
 	 * @param int $selected_status
 	 * @since 1.0
 	 */
-	function custom_status_field( $selected_status = null ) {
+	function custom_status_dropdown( $selected_status = null ) {
 		global $edit_flow;
 
 		$custom_statuses = $edit_flow->custom_status->get_custom_statuses();
@@ -1691,6 +1768,24 @@ jQuery(document).ready(function($) {
 			echo '>' . esc_html( $status->name ) . '</option>';
 		}
 		echo '</select>';
+	}
+
+	/**
+	 * Create a dropdown with taxonomy terms for use with defining notifications
+	 *
+	 * @param int $selected_term
+	 * @since 1.0
+	 */
+	function get_notification_taxonomy_dropdown( $selected_term = falsewp_ ) {
+		wp_dropdown_categories( [
+			'orderby' => 'name',
+			'taxonomy' => $this->notification_taxonomy,
+			'hide_empty' => false,
+			'selected' => $selected_term,
+			'show_option_none' => 'Any ' . $this->get_notification_taxonomy_name(),
+			'option_none_value' => '',
+			'name' => 'notification_term',
+		] );
 	}
 
 	/**
@@ -1772,6 +1867,7 @@ jQuery(document).ready(function($) {
 		$notification_name = sanitize_text_field( trim( $_POST['notification_name'] ) );
 		$notification_description = stripslashes( wp_filter_nohtml_kses( trim( $_POST['notification_description'] ) ) );
 		$notification_post_status = sanitize_text_field( $_POST['notification_post_status'] );
+		$notification_term = intval( $_POST['notification_term'] );
 		$notification_slack_webhook = sanitize_text_field( trim( $_POST['notification_slack_webhook'] ) );
 		$notification_api_endpoint = sanitize_text_field( trim( $_POST['notification_api_endpoint'] ) );
 
@@ -1819,10 +1915,20 @@ jQuery(document).ready(function($) {
 			return $result;
 		}
 
+		// Set any terms for the notification
+		wp_set_object_terms( $post_id, $notification_term, $this->notification_taxonomy );
+
 		// Add additional fields as post meta
 		update_post_meta( $result, 'post_status', $notification_post_status );
 		update_post_meta( $result, 'slack_webhook', $notification_slack_webhook );
 		update_post_meta( $result, 'api_endpoint', $notification_api_endpoint );
+
+		// If no terms were specified, note that for querying purposes
+		if ( empty( $notification_term ) ) {
+			update_post_meta( $result, 'no_terms', true );
+		} else {
+			delete_post_meta( $result, 'no_terms' );
+		}
 
 		return true;
 	}
@@ -1890,6 +1996,38 @@ jQuery(document).ready(function($) {
 		}
 		return add_query_arg( $args, get_admin_url( null, 'admin.php' ) );
 	}
+
+	/**
+	 * Get the taxonomy name for the notification taxonomy
+	 *
+	 * @return string
+	 */
+	function get_notification_taxonomy_name() {
+		$taxonomy = get_taxonomy( $this->notification_taxonomy );
+		if ( false === $taxonomy ) {
+			return '';
+		}
+
+		return $taxonomy->labels->singular_name;
+	}
+
+	/**
+	 * Get the term for the notification
+	 *
+	 * @param int $post_id
+	 * @return string|array
+	 */
+	function get_notification_term( $post_id ) {
+		$terms = get_the_terms( $post_id, $this->notification_taxonomy );
+		if ( empty( $terms ) || ! is_array( $terms ) ) {
+			return '';
+		}
+
+		$term = array_shift( $terms );
+		return $term->term_id;
+	}
+
+
 }
 
 }
@@ -1965,6 +2103,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 			'name'			=> __( 'Name', 'edit-flow' ),
 			'description'	=> __( 'Description', 'edit-flow' ),
 			'post_status' 	=> __( 'Post Status', 'edit-flow' ),
+			'term' 	=> $edit_flow->notifications->get_notification_taxonomy_name(),
 		);
 
 		return $columns;
@@ -2029,6 +2168,28 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 		$post_status = $edit_flow->custom_status->get_custom_status_by( 'slug', $slug );
 
 		return esc_html( $post_status->name );
+	}
+
+	/**
+	 * Displayed column showing terms for the notification
+	 *
+	 * @since 1.0
+	 *
+	 * @param object $item Custom notification as an object
+	 * @return string $output What will be rendered
+	 */
+	function column_term( $item ) {
+		global $edit_flow;
+
+		$terms = get_the_terms( $item->ID, $edit_flow->notifications->notification_taxonomy );
+		if ( empty( $terms ) ) {
+			return __( 'Any', 'edit-flow' ) . ' ' . $edit_flow->notifications->get_notification_taxonomy_name();
+		}
+
+		$term = array_shift( $terms );
+		$term_obj = get_term( $term->term_id, $edit_flow->notifications->notification_taxonomy );
+
+		return $term_obj->name;
 	}
 
 	/**
