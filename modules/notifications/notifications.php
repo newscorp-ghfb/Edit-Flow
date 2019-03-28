@@ -1387,7 +1387,7 @@ jQuery(document).ready(function($) {
 		<?php else: ?>
 		<?php
 		$wp_list_table = new EF_Custom_Notification_List_Table();
-		$wp_list_table->prepare_items(); // TODO
+		$wp_list_table->prepare_items();
 		?>
 			<div id="col-right">
 				<div class="col-wrap">
@@ -1499,14 +1499,20 @@ jQuery(document).ready(function($) {
 	 */
 	function get_custom_notification_by( $field, $value ) {
 
-		if ( ! in_array( $field, array( 'id', 'slug', 'name' ) ) )
+		if ( ! in_array( $field, array( 'id', 'slug', 'name' ) ) ) {
 			return false;
+		}
 
-		if ( 'id' == $field )
-			$field = 'term_id';
+		if ( 'id' === $field ) {
+			$field = 'ID';
+		} else if ( 'slug' === $field ) {
+			$field = 'post_name';
+		} else if ( 'name' === $field ) {
+			$field = 'post_title';
+		}
 
-		$custom_statuses = $this->get_custom_notifications();
-		$custom_status = wp_filter_object_list( $custom_statuses, array( $field => $value ) );
+		$custom_notifications = $this->get_custom_notifications();
+		$custom_notification = wp_filter_object_list( $custom_notifications, array( $field => $value ) );
 
 		if ( ! empty( $custom_notification ) ) {
 			return array_shift( $custom_notification );
@@ -1557,6 +1563,9 @@ jQuery(document).ready(function($) {
 		$return = $this->save_custom_notification();
 		if ( is_wp_error( $return ) ) {
 			wp_die( __( 'Could not add custom notification: ', 'edit-flow' ) . $return->get_error_message() );
+		} else if ( false === $return ) {
+			// Errors were encountered, exit.
+			return;
 		}
 
 		// Redirect if successful
@@ -1613,7 +1622,7 @@ jQuery(document).ready(function($) {
 		// Validate and sanitize the form data
 		$notification_name = sanitize_text_field( trim( $_POST['notification_name'] ) );
 		$notification_description = stripslashes( wp_filter_nohtml_kses( trim( $_POST['notification_description'] ) ) );
-		$notification_post_status = intval( $_POST['notification_post_status'] );
+		$notification_post_status = sanitize_text_field( $_POST['notification_post_status'] );
 		$notification_slack_webhook = sanitize_text_field( trim( $_POST['notification_slack_webhook'] ) );
 		$notification_api_endpoint = sanitize_text_field( trim( $_POST['notification_api_endpoint'] ) );
 
@@ -1622,12 +1631,12 @@ jQuery(document).ready(function($) {
 		 */
 		$_REQUEST['form-errors'] = array();
 		// Check if name field was filled in
-		if( empty( $status_name ) ) {
+		if( empty( $notification_name ) ) {
 			$_REQUEST['form-errors']['name'] = __( 'Please enter a name for the notification', 'edit-flow' );
 		}
 
 		// Check that the status name doesn't exceed 20 chars
-		if ( strlen( $status_name ) > 20 ) {
+		if ( strlen( $notification_name ) > 20 ) {
 			$_REQUEST['form-errors']['name'] = __( 'Notification name cannot exceed 20 characters. Please try a shorter name.', 'edit-flow' );
 		}
 
@@ -1644,14 +1653,15 @@ jQuery(document).ready(function($) {
 		// If there were any form errors, kick out and return them
 		if ( count( $_REQUEST['form-errors'] ) ) {
 			$_REQUEST['error'] = 'form-error';
-			return;
+			return false;
 		}
 
 		// Create or update the custom post that holds the notification
 		$result = wp_insert_post( [
-			'ID' => $post_id,
 			'post_title' => $notification_name,
 			'post_excerpt' => $notification_description,
+			'post_type' => self::post_type_key,
+			'post_status' => 'publish',
 		] );
 
 		// Error saving the notification
@@ -1771,7 +1781,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 		$sortable = array();
 		$this->_column_headers = array( $columns, $hidden, $sortable );
 
-		$this->items = $this->get_custom_notifications(); //TODO
+		$this->items = $edit_flow->notifications->get_custom_notifications();
 		$total_items = ( is_array( $this->items ) ) ? count( $this->items ) : 0;
 
 		$this->set_pagination_args( array(
@@ -1803,8 +1813,8 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 
 		$columns = array(
 			'name'			=> __( 'Name', 'edit-flow' ),
-			'type'			    => __( 'Type', 'edit-flow' ),
-			'post_status' 		=> __( 'Post Status', 'edit-flow' ),
+			'description'	=> __( 'Description', 'edit-flow' ),
+			'post_status' 	=> __( 'Post Status', 'edit-flow' ),
 		);
 
 		return $columns;
@@ -1835,7 +1845,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	function column_name( $item ) {
 		global $edit_flow;
 
-		$item_edit_link = esc_url( $edit_flow->notification->get_link( array( 'action' => 'edit-notification', 'notification-post-id' => $item->ID ) ) );
+		$item_edit_link = esc_url( $edit_flow->notifications->get_link( array( 'action' => 'edit-notification', 'notification-post-id' => $item->ID ) ) );
 
 		$output = '<strong><a href="' . $item_edit_link . '">' . esc_html( $item->post_title ) . '</a></strong>';
 		if ( $item->slug == $this->default_status )
@@ -1847,7 +1857,7 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 
 		$actions = array();
 		$actions['edit'] = "<a href='$item_edit_link'>" . __( 'Edit', 'edit-flow' ) . "</a>";
-		$actions['delete delete-status'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->notification->get_link( array( 'action' => 'delete-notification', 'notification-post-id' => $item->ID ) ) );
+		$actions['delete delete-status'] = sprintf( '<a href="%1$s">' . __( 'Delete', 'edit-flow' ) . '</a>', $edit_flow->notifications->get_link( array( 'action' => 'delete-notification', 'notification-post-id' => $item->ID ) ) );
 
 		$output .= $this->row_actions( $actions, false );
 
@@ -1876,7 +1886,13 @@ class EF_Custom_Notification_List_Table extends WP_List_Table
 	 * @return string $output What will be rendered
 	 */
 	function column_post_status( $item ) {
-		return esc_html( get_post_meta( $item->ID, 'post_status' ) );
+		global $edit_flow;
+
+		$slug = get_post_meta( $item->ID, 'post_status', true );
+
+		$post_status = $edit_flow->custom_status->get_custom_status_by( 'slug', $slug );
+
+		return esc_html( $post_status->name );
 	}
 
 	/**
